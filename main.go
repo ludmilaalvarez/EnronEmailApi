@@ -2,7 +2,6 @@ package main
 
 import (
 	"EnronEmailApi/controllers"
-	"EnronEmailApi/zinc"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -10,12 +9,10 @@ import (
 )
 
 func main() {
-	//services.Init()
-	zinc.EstablishConnection()
 
 	r := chi.NewRouter()
 	r.Post("/indexer", controllers.IndexerEnron)
-	r.Post("/search", controllers.SearchEmails)
+	r.Post("/search/{text}", controllers.SearchEmails)
 
 	corsOptions := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
@@ -26,7 +23,4 @@ func main() {
 	handler := corsOptions.Handler(r)
 
 	http.ListenAndServe(":3000", handler)
-
-	//http.ListenAndServe(":3000", r)
-
 }

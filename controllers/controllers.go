@@ -4,29 +4,25 @@ import (
 	"EnronEmailApi/services"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func IndexerEnron(w http.ResponseWriter, r *http.Request) {
 
 	go services.IndexStart()
+
 	w.Write([]byte("Cargando emails..."))
 }
 
 func SearchEmails(w http.ResponseWriter, r *http.Request) {
+	text := chi.URLParam(r, "text")
 
-	var text string
-
-	rqBody, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		fmt.Fprintf(w, "Inserte un item válido")
-	}
-
-	json.Unmarshal(rqBody, &text)
+	fmt.Println(text)
 
 	respuesta := services.SearchEmails(&text)
 
-	json.NewEncoder(w).Encode(respuesta)
-
+	json.NewEncoder(w).Encode(respuesta.Hits.Hits)
 }

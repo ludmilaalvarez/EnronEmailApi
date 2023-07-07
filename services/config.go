@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+
+	"encoding/base64"
 	"io/ioutil"
+	"path"
 	"strings"
 
-	//"encoding/base64"
+	"github.com/joho/godotenv"
+
 	"EnronEmailApi/models"
-	"EnronEmailApi/zinc"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -30,8 +33,9 @@ func ListAllFolders(folderName string) ([]string, []string) {
 	for _, f := range files {
 		if f.IsDir() {
 			listFiles = append(listFiles, f.Name())
+		} else {
+			listFolders = append(listFolders, f.Name())
 		}
-		listFolders = append(listFolders, f.Name())
 	}
 	return listFiles, listFolders
 }
@@ -53,6 +57,7 @@ func DivideFolders(list []string, numParts int) [][]string {
 
 	return divided
 }
+
 func ListFiles(folderName string) []string {
 	files, err := ioutil.ReadDir(folderName)
 	if err != nil {
@@ -65,84 +70,9 @@ func ListFiles(folderName string) []string {
 	return filesNames
 }
 
-func Algodeaca(folderList []string, path string, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	for _, user := range folderList {
-
-		var jsonForBulk models.JsonBulk
-		jsonForBulk.Index = "email"
-
-		folders, files := ListAllFolders(path + user)
-		for _, file := range files {
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go ProcessMailFile(path+user+"/", file, &wg, &jsonForBulk)
-			wg.Wait()
-		}
-
-		for _, folder := range folders {
-
-			mailFiles := ListFiles(path + user + "/" + folder + "/")
-
-			for _, mailFile := range mailFiles {
-				var wg sync.WaitGroup
-
-				wg.Add(1)
-				go ProcessMailFile(path+user+"/"+folder+"/", mailFile, &wg, &jsonForBulk)
-				wg.Wait()
-			}
-
-		}
-
-		IndexDataBulk(jsonForBulk)
-		jsonForBulk.Records = []models.Email{}
-
-	}
-}
-
-func ProcessMailFile(path, mailFile string, wg *sync.WaitGroup, jsonForBulk *models.JsonBulk) {
-	defer wg.Done()
-
-	//var JSonGeneral models.JsonFinal
-
-	sysFile, err := os.Open(path + mailFile)
-	if err != nil {
-		log.Printf("Error opening file: %s\n", err)
-		return
-	}
-	defer sysFile.Close()
-
-	lines := bufio.NewScanner(sysFile)
-
-	data := ParseData(lines)
-
-	IndexData(data, jsonForBulk)
-	JSonGeneral.Emails = append(JSonGeneral.Emails, data)
-
-}
-func ParseData(dataLines *bufio.Scanner) models.Email {
+func parseData(dataLines *bufio.Scanner) models.Email {
 	var data models.Email
 	for dataLines.Scan() {
-		//data.ID = id
-		/* fileContent, err := os.ReadFile(email)
-		if err != nil {
-			panic(err.Error())
-		}
-		r := bytes.NewReader(fileContent)
-		m, err := mail.ReadMessage(r)
-		if err != nil {
-
-			return
-		}
-		body, err := io.ReadAll(m.Body)
-		if err != nil {
-
-		}
-		zincData <- fmt.Sprintf(`{"_id": "%s", "from": "%s", "to": "%s", "subject": "%s", "content": "%s"}`,
-		email, fmt.Sprintf("%q", m.Header.Get("From")), fmt.Sprintf("%q", m.Header.Get("To")),
-		fmt.Sprintf("%q", m.Header.Get("Subject")), fmt.Sprintf("%q", string(body)))*/
-
 		line := dataLines.Text()
 		switch {
 		case strings.Contains(line, "Message-ID:"):
@@ -179,29 +109,73 @@ func ParseData(dataLines *bufio.Scanner) models.Email {
 	}
 	return data
 }
+func Algodeaca(folderList []string, path string, wg *sync.WaitGroup) {
 
-func IndexData(data models.Email, jsonForBulk *models.JsonBulk) {
+	defer wg.Done()
 
-	jsonForBulk.Records = append(jsonForBulk.Records, data)
+	for _, user := range folderList {
+
+		var jsonForBulk models.JsonBulk
+		jsonForBulk.Index = "email"
+
+		fmt.Println(user)
+
+		processDir(path+user, &jsonForBulk)
+
+		IndexDataBulk(jsonForBulk)
+		jsonForBulk.Records = []models.Email{}
+
+	}
 
 }
 
-func IndexDataBulk(data models.JsonBulk) {
+func ProcessMailFile(path string, jsonForBulk *models.JsonBulk, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-	index := "emails"
+	sysFile, err := os.Open(path)
+	if err != nil {
+		log.Printf("Error opening file: %s\n", err)
+		return
+	}
+	defer sysFile.Close()
 
-	data.Index = index
+	lines := bufio.NewScanner(sysFile)
 
-	body, _ := json.Marshal(data)
+	data := parseData(lines)
 
-	req, err := http.NewRequest("POST", zinc.Zinc_url, bytes.NewBuffer(body))
-	fmt.Println(zinc.Zinc_url)
+	IndexData(data, jsonForBulk)
+
+}
+
+func IndexDataBulk(jsonForBulk models.JsonBulk) {
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error al cargar el archivo .env")
+	}
+
+	var (
+		user     = os.Getenv("USER")
+		password = os.Getenv("PASSWORD")
+	)
+
+	auth := user + ":" + password
+	bas64encoded_creds := base64.StdEncoding.EncodeToString([]byte(auth))
+
+	jsonForBulk.Index = "emails"
+	zinc_host := "http://localhost:4080"
+	zinc_url := zinc_host + "/api/_bulkv2"
+
+	body, _ := json.Marshal(jsonForBulk)
+
+	req, err := http.NewRequest("POST", zinc_url, bytes.NewBuffer(body))
+
 	if err != nil {
 		log.Fatal("Error reading request. ", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Basic "+zinc.Bas64encoded_creds)
+	req.Header.Set("Authorization", "Basic "+bas64encoded_creds)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -210,19 +184,31 @@ func IndexDataBulk(data models.JsonBulk) {
 	defer resp.Body.Close()
 }
 
-func JSONfinal(jsonData models.JsonFinal) {
-	file, err := os.Create("jSonFinal.json")
-	if err != nil {
-		log.Fatalf("failed creating file: %s", err)
-	}
-	defer file.Close()
+func IndexData(data models.Email, jsonForBulk *models.JsonBulk) {
 
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "   ")
-	err = enc.Encode(map[string]models.JsonFinal{"Enron-email": jsonData})
+	jsonForBulk.Records = append(jsonForBulk.Records, data)
+}
+
+func processDir(name string, jsonForBulk *models.JsonBulk) {
+	d, err := os.Open(name)
 	if err != nil {
-		log.Fatalf("failed encoding JSON: %s", err)
+		fmt.Println(err.Error())
+	}
+	defer d.Close()
+
+	files, err := d.ReadDir(-1)
+	if err != nil {
+		fmt.Println(err.Error())
 	}
 
-	fmt.Println("JSON File successfully created")
+	for _, f := range files {
+		if f.IsDir() {
+			processDir(path.Join(name, f.Name()), jsonForBulk)
+		} else {
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go ProcessMailFile(path.Join(name, f.Name()), jsonForBulk, &wg)
+			wg.Wait()
+		}
+	}
 }
